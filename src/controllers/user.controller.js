@@ -3,26 +3,33 @@ import { apiError } from "../utils/apiError.js";
 import { User } from "../models/user.model.js";
 import { uploadOnCloudinary } from "../utils/cloudinary.js";
 import { apiResponse } from "../utils/apiResponse.js";
+import path from "path";
+import fs from "fs"; // Import file system module
 
+// 1.get user details from frontend
+// 2.validation - Check if any required field is empty
+// 3.check if user already exists: username, email
+// 4.check for images, check for avatar
+// 5.upload them to cloudinary, avatar
+// 6.create user object - create entry in db
+// 7.remove password and refresh token field from response
+// 8.check for user creation
+// 9.return res
+
+// Function to handle user registration
 const registerUser = asyncHandler(async (req, res) => {
-  // 1.get user details from frontend
-  // 2.validation - not empty
-  // 3.check if user already exists: username, email
-  // 4.check for images, check for avatar
-  // 5.upload them to cloudinary, avatar
-  // 6.create user object - create entry in db
-  // 7.remove password and refresh token field from response
-  // 8.check for user creation
-  // 9.return res
+  // console.log("Uploaded files:", req.files);
 
+  // 1.get user details from frontend
   const { fullName, email, username, password } = req.body;
-  console.log("email: ", email);
+  // console.log("email: ", email);
 
   /* if (fullName === "") {
     throw new apiError(400, "fullname is required"); 
   } */
   /* It is very lengthy task to handle every required field with if else condition, hence we use single array consisting of every field with .some method which Determines whether the specified callback function returns true for any element of an array.*/
 
+  // 2.validation - Check if any required field is empty
   if (
     [fullName, email, username, password].some((field) => field?.trim() === "")
     /*
@@ -45,7 +52,8 @@ const registerUser = asyncHandler(async (req, res) => {
     throw new apiError(400, "All fields are required");
   }
 
-  const existedUser = User.findOne({
+  // 3.check if user already exists: username, email
+  const existedUser = await User.findOne({
     $or: [{ username }, { email }],
   });
 
@@ -55,38 +63,70 @@ const registerUser = asyncHandler(async (req, res) => {
       "User with entered email or username already exists"
     );
   }
+  // 4.check for images, check for avatar
+  const avatarLocalPath = req.files?.avatar?.[0]?.path;
+  const coverImageLocalPath = req.files?.coverImage?.[0]?.path;
 
-  const avatarLocalPath = req.files?.avatar[0]?.path;
-  const coverImageLocalImage = req.files?.coverImage[0]?.path;
+  console.log("Avatar local path: ", avatarLocalPath);
+  console.log("Cover image local path: ", coverImageLocalPath);
 
-  if (!avatarLocalPath) {
+  // Normalize the paths
+  const normalizedAvatarPath = path.resolve(avatarLocalPath);
+  const normalizedCoverImagePath = path.resolve(coverImageLocalPath);
+
+  /*  console.log(
+    "user.controller req.files: ",
+    req.files,
+    "Avatar local path: ",
+    normalizedAvatarPath,
+    "coverImageLocalPath: ",
+    normalizedCoverImagePath
+  ); */
+
+  /* 
+const coverImageLocalPath = req.files?.coverImage?.[0]?.path;
+will ensure coverImage exists before trying to access its index, so don't need to write so many checks using classic if else approach 
+ */
+
+  if (!normalizedAvatarPath) {
     throw new apiError(400, "Avatar file is required");
   }
 
-  const avatar = await uploadOnCloudinary(avatarLocalPath);
-  const coverImage = await uploadOnCloudinary(coverImageLocalImage);
+  // Check if the avatar file exists
+  if (!fs.existsSync(normalizedAvatarPath)) {
+    throw new apiError(400, "Avatar file not found");
+  }
+  // 5.upload them to cloudinary, avatar
+  const avatar = await uploadOnCloudinary(normalizedAvatarPath);
+  console.log("Avatar upload response:", avatar);
+
+  const coverImage = await uploadOnCloudinary(normalizedCoverImagePath);
 
   if (!avatar) {
     throw new apiError(400, "Avatar file is required");
   }
 
+  // 6.create user object - create entry in db
   const user = await User.create({
     fullName,
     avatar: avatar.url,
     coverImage: coverImage?.url || "",
-    email,
+    email: email.toLowerCase(),
     password,
     username: username.toLowerCase(),
   });
 
+  // 7.remove password and refresh token field from response
   const createdUser = await User.findById(user._id).select(
     "-password -refreshToken"
   );
 
+  // 8.check for user creation
   if (!createdUser) {
     throw new apiError(500, "Something went wrong while registering the user");
   }
 
+  // 9.return res
   return res
     .status(201)
     .json(new apiResponse(200, createdUser, "User registered successfully!"));
